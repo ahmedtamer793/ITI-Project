@@ -1,4 +1,5 @@
 # 🚜 Agri-Uber: Agricultural Resource Management System
+
 ## 📌 Project Overview
 Agri-Uber is a comprehensive C++ console application designed to bridge the gap between **Farmers** and **Agricultural Machine Owners**. It provides a seamless platform for booking machinery, managing schedules, and tracking financial statistics, fully integrated with a **MySQL** database for robust data persistence.
 
@@ -16,30 +17,34 @@ Agri-Uber is a comprehensive C++ console application designed to bridge the gap 
 - **Database:** MySQL Server
 - **Database Driver:** MySQL Connector/C++ (JDBC API)
 - **Architecture & Design Patterns:**
-  - **Repository Pattern:** Clean separation between business logic and data access (e.g., `MySQLUserRepo`, `MySQLBookingRepo`).
-  - **Dependency Injection:** Repositories are injected into Service classes (`AuthService`, `BookingService`).
-  - **OOP Principles:** Extensive use of Inheritance, Polymorphism, Encapsulation, and Interfaces.
-  - **Input Validation:** Robust Regex-based validation for user inputs (names, phones, dates).
+  - **Repository Pattern:** Clean separation between business logic and data access.
+  - **Dependency Injection:** Repositories are injected into Service classes.
+  - **OOP Principles:** Extensive use of Inheritance, Polymorphism, and Interfaces.
 
 ## ⚙️ How to Setup and Run
 
-### 1. Database Configuration (Important)
-To ensure a smooth evaluation experience without import errors, the raw database files are provided.
+### 1. Database Configuration
+Due to connection export constraints, the raw database files are provided for a guaranteed setup.
 1. Locate the `agri_uber.zip` file in this repository.
 2. Extract the `agri_uber` folder from the zip file.
-3. Navigate to your XAMPP installation directory, specifically: `C:\xampp\mysql\data\` (or wherever XAMPP is installed).
-4. Paste the extracted `agri_uber` folder directly into the `data` directory.
-5. Start the **MySQL module** via the XAMPP Control Panel.
-    
-**Default Connection Details:**
-- Host: `127.0.0.1`
-- Port: `3307` *(Ensure your MySQL is configured to run on this port)*
-- Username: `root`
-- Password: *(Leave blank)*
+3. Paste it into your MySQL data directory: `C:\xampp\mysql\data\`.
+4. Start the **MySQL module** via XAMPP on port **3307**.
 
 ### 2. Running the Application
-1. Clone the repository to your local machine.
-2. Open the `ITI Project.sln` file using **Visual Studio**.
-3. Build and Run the project (`Ctrl + F5`).
+1. Open the `ITI Project.sln` file using **Visual Studio**.
+2. Build and Run the project (`Ctrl + F5`).
+*Note: All required DLLs (e.g., `mysqlcppconn-10-vs14.dll`) are included in the root folder.*
 
-*Note: All required dynamic link libraries (e.g., `mysqlcppconn-10-vs14.dll`) and authentication plugins are included in the repository to ensure an immediate, out-of-the-box build without requiring external environment setups.*
+---
+
+## 💡 The Core Idea: "Uber for Farmers" (أوبر الفلاحين)
+
+The project stems from a real-world agricultural challenge: **Access to Technology**. Many small-scale farmers cannot afford to buy expensive machinery like harvesters or high-end tractors, while many machine owners have their equipment sitting idle between seasons.
+
+**Agri-Uber** functions exactly like a ride-sharing app but for the fields:
+- **For the Farmer:** It democratizes access to advanced tools. A farmer can "hail" a tractor for a specific date and duration, paying only for what they use, which significantly reduces harvest costs.
+- **For the Owner:** It turns idle machinery into a profit center, ensuring their equipment is working and earning throughout the year.
+- **The Result:** A shared economy model that boosts agricultural productivity and ensures that no land goes unplowed due to a lack of equipment.
+
+---
+**Maintained by:** Ahmed Tamer (Jimi)
