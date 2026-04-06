@@ -46,5 +46,4 @@ The project stems from a real-world agricultural challenge: **Access to Technolo
 - **For the Owner:** It turns idle machinery into a profit center, ensuring their equipment is working and earning throughout the year.
 - **The Result:** A shared economy model that boosts agricultural productivity and ensures that no land goes unplowed due to a lack of equipment.
 
----
-**Maintained by:** Ahmed Tamer (Jimi)
+
