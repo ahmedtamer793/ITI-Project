@@ -1,4 +1,4 @@
-﻿#define _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
 #include <iostream>
 #include <vector>
 #include <string>
@@ -11,40 +11,59 @@
 #include <ctime>
 #include <sstream>
 #include <iomanip>
-#include <mysql_driver.h>
-#include <mysql_connection.h>
-#include <cppconn/exception.h>
-#include <cppconn/prepared_statement.h>
-#include <cppconn/resultset.h>
+#include "sqlite3.h"
 
 using namespace std;
 
 // ==========================================
 // 0. Database Manager
-// Responsible for establishing a connection with the MySQL server
 // ==========================================
 class DBManager {
 public:
-    static sql::Connection* getConnection() {
-        try {
-            sql::mysql::MySQL_Driver* driver = sql::mysql::get_mysql_driver_instance();
-            sql::ConnectOptionsMap properties;
-
-            // Database configuration
-            properties["hostName"] = "tcp://127.0.0.1:3307";
-            properties["userName"] = "root";
-            properties["password"] = "";
-            properties["schema"] = "agri_uber";
-
-            // Required authentication plugin for XAMPP
-            properties["OPT_DEFAULT_AUTH"] = "mysql_native_password";
-
-            return driver->connect(properties);
-        }
-        catch (sql::SQLException& e) {
-            cout << "\n[Database Connection Error]: " << e.what() << "\n";
+    static sqlite3* getConnection() {
+        sqlite3* db;
+        int rc = sqlite3_open("agri_uber.db", &db);
+        if (rc) {
+            cout << "\n[Database Error]: " << sqlite3_errmsg(db) << "\n";
             return nullptr;
         }
+        return db;
+    }
+
+    static void initializeSchema() {
+        sqlite3* db = getConnection();
+        if (!db) return;
+
+        const char* sql =
+            "CREATE TABLE IF NOT EXISTS users ("
+            "user_id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "name TEXT NOT NULL, "
+            "phone TEXT UNIQUE NOT NULL, "
+            "role TEXT NOT NULL, "
+            "land_size REAL);"
+
+            "CREATE TABLE IF NOT EXISTS machines ("
+            "machine_id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "owner_id INTEGER NOT NULL, "
+            "machine_type TEXT NOT NULL, "
+            "price_per_hour REAL NOT NULL, "
+            "FOREIGN KEY (owner_id) REFERENCES users(user_id) ON DELETE CASCADE);"
+
+            "CREATE TABLE IF NOT EXISTS bookings ("
+            "booking_id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "farmer_id INTEGER NOT NULL, "
+            "machine_id INTEGER NOT NULL, "
+            "booking_date TEXT NOT NULL, "
+            "hours INTEGER NOT NULL, "
+            "total_cost REAL NOT NULL, "
+            "status TEXT DEFAULT 'Pending', "
+            "FOREIGN KEY (farmer_id) REFERENCES users(user_id) ON DELETE CASCADE, "
+            "FOREIGN KEY (machine_id) REFERENCES machines(machine_id) ON DELETE CASCADE);";
+
+        char* errMsg = 0;
+        sqlite3_exec(db, sql, 0, 0, &errMsg);
+        if (errMsg) sqlite3_free(errMsg);
+        sqlite3_close(db);
     }
 };
 
@@ -64,7 +83,6 @@ string statusToString(BookingStatus s) {
     }
 }
 
-// Validator class for handling formatting and constraints
 class InputValidator {
 public:
     static bool isValidName(const string& name) {
@@ -100,7 +118,6 @@ public:
     }
 };
 
-// Input handler for robust console reading
 class InputHandler {
 public:
     static int getIntInput(string prompt, int min, int max) {
@@ -183,7 +200,6 @@ public:
     User(int id, string name, string phone, UserRole role)
         : id(id), name(name), phone(phone), role(role) {
     }
-
     virtual ~User() = default;
 
     int getId() const { return id; }
@@ -194,7 +210,6 @@ public:
     virtual void displayInfo() = 0;
 };
 
-// Farmer Entity
 class Farmer : public User {
 private:
     double landSize;
@@ -214,7 +229,6 @@ public:
     }
 };
 
-// Machine Owner Entity
 class MachineOwner : public User {
 public:
     MachineOwner(int id, string name, string phone)
@@ -276,8 +290,6 @@ public:
 // ==========================================
 // 3. Interfaces (Contracts)
 // ==========================================
-
-// DTO for handling joined Booking data for owners (SOLID: Single Responsibility)
 struct OwnerBookingDTO {
     int bookingId;
     int machineId;
@@ -321,236 +333,189 @@ public:
 };
 
 // ==========================================
-// 4. Repositories (Data Access Layer - MySQL)
+// 4. Repositories (Data Access Layer - SQLite)
 // ==========================================
 
-// --- MySQL User Repository ---
-class MySQLUserRepo : public IUserRepository {
+class SQLiteUserRepo : public IUserRepository {
 public:
     void saveUser(shared_ptr<User> user) override {
-        try {
-            sql::Connection* con = DBManager::getConnection();
-            if (!con) return;
+        sqlite3* db = DBManager::getConnection();
+        if (!db) return;
 
-            sql::PreparedStatement* pstmt = con->prepareStatement(
-                "INSERT INTO users (name, phone, role, land_size) VALUES (?, ?, ?, ?)"
-            );
-            pstmt->setString(1, user->getName());
-            pstmt->setString(2, user->getPhone());
+        string sql = "INSERT INTO users (name, phone, role, land_size) VALUES (?, ?, ?, ?)";
+        sqlite3_stmt* stmt;
+
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, user->getName().c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, user->getPhone().c_str(), -1, SQLITE_TRANSIENT);
 
             if (user->getRole() == UserRole::Farmer) {
-                pstmt->setString(3, "Farmer");
+                sqlite3_bind_text(stmt, 3, "Farmer", -1, SQLITE_TRANSIENT);
                 shared_ptr<Farmer> f = dynamic_pointer_cast<Farmer>(user);
-                pstmt->setDouble(4, f ? f->getLandSize() : 0.0);
+                sqlite3_bind_double(stmt, 4, f ? f->getLandSize() : 0.0);
             }
             else {
-                pstmt->setString(3, "MachineOwner");
-                pstmt->setDouble(4, 0.0);
+                sqlite3_bind_text(stmt, 3, "MachineOwner", -1, SQLITE_TRANSIENT);
+                sqlite3_bind_double(stmt, 4, 0.0);
             }
-
-            pstmt->executeUpdate();
-            delete pstmt;
-            delete con;
+            sqlite3_step(stmt);
         }
-        catch (sql::SQLException& e) {
-            cout << "\n[DB Error - Save User]: " << e.what() << "\n";
-        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
     }
 
     shared_ptr<User> findByPhone(string phone) override {
         shared_ptr<User> foundUser = nullptr;
-        try {
-            sql::Connection* con = DBManager::getConnection();
-            if (!con) return nullptr;
+        sqlite3* db = DBManager::getConnection();
+        if (!db) return nullptr;
 
-            sql::PreparedStatement* pstmt = con->prepareStatement(
-                "SELECT user_id, name, phone, role, land_size FROM users WHERE phone = ?"
-            );
-            pstmt->setString(1, phone);
-            sql::ResultSet* res = pstmt->executeQuery();
+        string sql = "SELECT user_id, name, phone, role, land_size FROM users WHERE phone = ?";
+        sqlite3_stmt* stmt;
 
-            if (res->next()) {
-                int db_id = res->getInt(1);
-                string db_name = res->getString(2);
-                string db_phone = res->getString(3);
-                string db_role = res->getString(4);
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, phone.c_str(), -1, SQLITE_TRANSIENT);
+
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                int db_id = sqlite3_column_int(stmt, 0);
+                string db_name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+                string db_phone = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+                string db_role = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
 
                 if (db_role == "Farmer") {
-                    double db_landSize = res->getDouble(5);
+                    double db_landSize = sqlite3_column_double(stmt, 4);
                     foundUser = make_shared<Farmer>(db_id, db_name, db_phone, db_landSize);
                 }
                 else {
                     foundUser = make_shared<MachineOwner>(db_id, db_name, db_phone);
                 }
             }
-
-            delete res;
-            delete pstmt;
-            delete con;
         }
-        catch (sql::SQLException& e) {
-            cout << "\n[DB Error - Find User]: " << e.what() << "\n";
-        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
         return foundUser;
     }
 
     shared_ptr<User> findById(int id) override {
         shared_ptr<User> foundUser = nullptr;
-        try {
-            sql::Connection* con = DBManager::getConnection();
-            if (!con) return nullptr;
+        sqlite3* db = DBManager::getConnection();
+        if (!db) return nullptr;
 
-            sql::PreparedStatement* pstmt = con->prepareStatement(
-                "SELECT user_id, name, phone, role, land_size FROM users WHERE user_id = ?"
-            );
-            pstmt->setInt(1, id);
-            sql::ResultSet* res = pstmt->executeQuery();
+        string sql = "SELECT user_id, name, phone, role, land_size FROM users WHERE user_id = ?";
+        sqlite3_stmt* stmt;
 
-            if (res->next()) {
-                int db_id = res->getInt(1);
-                string db_name = res->getString(2);
-                string db_phone = res->getString(3);
-                string db_role = res->getString(4);
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, id);
+
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                int db_id = sqlite3_column_int(stmt, 0);
+                string db_name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+                string db_phone = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+                string db_role = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
 
                 if (db_role == "Farmer") {
-                    double db_landSize = res->getDouble(5);
+                    double db_landSize = sqlite3_column_double(stmt, 4);
                     foundUser = make_shared<Farmer>(db_id, db_name, db_phone, db_landSize);
                 }
                 else {
                     foundUser = make_shared<MachineOwner>(db_id, db_name, db_phone);
                 }
             }
-
-            delete res;
-            delete pstmt;
-            delete con;
         }
-        catch (sql::SQLException& e) {
-            cout << "\n[DB Error - Find User]: " << e.what() << "\n";
-        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
         return foundUser;
     }
 };
 
-// --- MySQL Machine Repository ---
-class MySQLMachineRepo : public IMachineRepository {
+class SQLiteMachineRepo : public IMachineRepository {
 public:
     void saveMachine(shared_ptr<Machine> machine) override {
-        try {
-            sql::Connection* con = DBManager::getConnection();
-            if (!con) return;
+        sqlite3* db = DBManager::getConnection();
+        if (!db) return;
 
-            sql::PreparedStatement* pstmt = con->prepareStatement(
-                "INSERT INTO machines (owner_id, machine_type, price_per_hour) VALUES (?, ?, ?)"
-            );
-            pstmt->setInt(1, machine->getOwnerId());
-            pstmt->setString(2, machine->getType());
-            pstmt->setDouble(3, machine->getPrice());
+        string sql = "INSERT INTO machines (owner_id, machine_type, price_per_hour) VALUES (?, ?, ?)";
+        sqlite3_stmt* stmt;
 
-            pstmt->executeUpdate();
-            delete pstmt;
-            delete con;
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, machine->getOwnerId());
+            sqlite3_bind_text(stmt, 2, machine->getType().c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_double(stmt, 3, machine->getPrice());
+            sqlite3_step(stmt);
         }
-        catch (sql::SQLException& e) {
-            cout << "\n[DB Error - Save Machine]: " << e.what() << "\n";
-        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
     }
 
     vector<shared_ptr<Machine>> getAllMachines() override {
         vector<shared_ptr<Machine>> machineList;
-        try {
-            sql::Connection* con = DBManager::getConnection();
-            if (!con) return machineList;
+        sqlite3* db = DBManager::getConnection();
+        if (!db) return machineList;
 
-            sql::PreparedStatement* pstmt = con->prepareStatement(
-                "SELECT machine_id, owner_id, machine_type, price_per_hour FROM machines"
-            );
-            sql::ResultSet* res = pstmt->executeQuery();
+        string sql = "SELECT machine_id, owner_id, machine_type, price_per_hour FROM machines";
+        sqlite3_stmt* stmt;
 
-            while (res->next()) {
-                int m_id = res->getInt(1);
-                int m_ownerId = res->getInt(2);
-                string m_type = res->getString(3);
-                double m_price = res->getDouble(4);
-
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                int m_id = sqlite3_column_int(stmt, 0);
+                int m_ownerId = sqlite3_column_int(stmt, 1);
+                string m_type = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+                double m_price = sqlite3_column_double(stmt, 3);
                 machineList.push_back(make_shared<Machine>(m_id, m_ownerId, m_type, m_price));
             }
-
-            delete res;
-            delete pstmt;
-            delete con;
         }
-        catch (sql::SQLException& e) {
-            cout << "\n[DB Error - Get All Machines]: " << e.what() << "\n";
-        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
         return machineList;
     }
 
     shared_ptr<Machine> getById(int id) override {
         shared_ptr<Machine> foundMachine = nullptr;
-        try {
-            sql::Connection* con = DBManager::getConnection();
-            if (!con) return nullptr;
+        sqlite3* db = DBManager::getConnection();
+        if (!db) return nullptr;
 
-            sql::PreparedStatement* pstmt = con->prepareStatement(
-                "SELECT machine_id, owner_id, machine_type, price_per_hour FROM machines WHERE machine_id = ?"
-            );
-            pstmt->setInt(1, id);
-            sql::ResultSet* res = pstmt->executeQuery();
+        string sql = "SELECT machine_id, owner_id, machine_type, price_per_hour FROM machines WHERE machine_id = ?";
+        sqlite3_stmt* stmt;
 
-            if (res->next()) {
-                int m_id = res->getInt(1);
-                int m_ownerId = res->getInt(2);
-                string m_type = res->getString(3);
-                double m_price = res->getDouble(4);
-
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, id);
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                int m_id = sqlite3_column_int(stmt, 0);
+                int m_ownerId = sqlite3_column_int(stmt, 1);
+                string m_type = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+                double m_price = sqlite3_column_double(stmt, 3);
                 foundMachine = make_shared<Machine>(m_id, m_ownerId, m_type, m_price);
             }
-
-            delete res;
-            delete pstmt;
-            delete con;
         }
-        catch (sql::SQLException& e) {
-            cout << "\n[DB Error - Get Machine By ID]: " << e.what() << "\n";
-        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
         return foundMachine;
     }
 
     vector<shared_ptr<Machine>> getMachinesByOwner(int ownerId) override {
         vector<shared_ptr<Machine>> ownerMachines;
-        try {
-            sql::Connection* con = DBManager::getConnection();
-            if (!con) return ownerMachines;
+        sqlite3* db = DBManager::getConnection();
+        if (!db) return ownerMachines;
 
-            sql::PreparedStatement* pstmt = con->prepareStatement(
-                "SELECT machine_id, owner_id, machine_type, price_per_hour FROM machines WHERE owner_id = ?"
-            );
-            pstmt->setInt(1, ownerId);
-            sql::ResultSet* res = pstmt->executeQuery();
+        string sql = "SELECT machine_id, owner_id, machine_type, price_per_hour FROM machines WHERE owner_id = ?";
+        sqlite3_stmt* stmt;
 
-            while (res->next()) {
-                int m_id = res->getInt(1);
-                int m_ownerId = res->getInt(2);
-                string m_type = res->getString(3);
-                double m_price = res->getDouble(4);
-
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, ownerId);
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                int m_id = sqlite3_column_int(stmt, 0);
+                int m_ownerId = sqlite3_column_int(stmt, 1);
+                string m_type = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+                double m_price = sqlite3_column_double(stmt, 3);
                 ownerMachines.push_back(make_shared<Machine>(m_id, m_ownerId, m_type, m_price));
             }
-
-            delete res;
-            delete pstmt;
-            delete con;
         }
-        catch (sql::SQLException& e) {
-            cout << "\n[DB Error - Get Machines By Owner]: " << e.what() << "\n";
-        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
         return ownerMachines;
     }
 };
 
-// --- MySQL Booking Repository ---
-class MySQLBookingRepo : public IBookingRepository {
+class SQLiteBookingRepo : public IBookingRepository {
     BookingStatus stringToStatus(string s) {
         if (s == "Accepted") return BookingStatus::Accepted;
         if (s == "Rejected") return BookingStatus::Rejected;
@@ -561,216 +526,191 @@ class MySQLBookingRepo : public IBookingRepository {
 
 public:
     void saveBooking(shared_ptr<Booking> b) override {
-        try {
-            sql::Connection* con = DBManager::getConnection();
-            if (!con) return;
+        sqlite3* db = DBManager::getConnection();
+        if (!db) return;
 
-            sql::PreparedStatement* pstmt = con->prepareStatement(
-                "INSERT INTO bookings (farmer_id, machine_id, booking_date, hours, total_cost, status) VALUES (?, ?, ?, ?, ?, ?)"
-            );
-            pstmt->setInt(1, b->getFarmerId());
-            pstmt->setInt(2, b->getMachineId());
-            pstmt->setString(3, b->getDate());
-            pstmt->setInt(4, b->getHours());
-            pstmt->setDouble(5, b->getTotalCost());
-            pstmt->setString(6, statusToString(b->getStatus()));
+        string sql = "INSERT INTO bookings (farmer_id, machine_id, booking_date, hours, total_cost, status) VALUES (?, ?, ?, ?, ?, ?)";
+        sqlite3_stmt* stmt;
 
-            pstmt->executeUpdate();
-            delete pstmt;
-            delete con;
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, b->getFarmerId());
+            sqlite3_bind_int(stmt, 2, b->getMachineId());
+            sqlite3_bind_text(stmt, 3, b->getDate().c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 4, b->getHours());
+            sqlite3_bind_double(stmt, 5, b->getTotalCost());
+            sqlite3_bind_text(stmt, 6, statusToString(b->getStatus()).c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(stmt);
         }
-        catch (sql::SQLException& e) {
-            cout << "\n[DB Error - Save Booking]: " << e.what() << "\n";
-        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
     }
 
     void updateBooking(shared_ptr<Booking> b) override {
-        try {
-            sql::Connection* con = DBManager::getConnection();
-            if (!con) return;
+        sqlite3* db = DBManager::getConnection();
+        if (!db) return;
 
-            sql::PreparedStatement* pstmt = con->prepareStatement(
-                "UPDATE bookings SET status = ? WHERE booking_id = ?"
-            );
-            pstmt->setString(1, statusToString(b->getStatus()));
-            pstmt->setInt(2, b->getId());
-            pstmt->executeUpdate();
+        string sql = "UPDATE bookings SET status = ? WHERE booking_id = ?";
+        sqlite3_stmt* stmt;
 
-            delete pstmt;
-            delete con;
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, statusToString(b->getStatus()).c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 2, b->getId());
+            sqlite3_step(stmt);
         }
-        catch (sql::SQLException& e) {
-            cout << "\n[DB Error - Update Booking]: " << e.what() << "\n";
-        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
     }
 
     bool isMachineAvailable(int machineId, string requestedDate) override {
         bool available = true;
-        try {
-            sql::Connection* con = DBManager::getConnection();
-            if (!con) return false;
+        sqlite3* db = DBManager::getConnection();
+        if (!db) return false;
 
-            sql::PreparedStatement* pstmt = con->prepareStatement(
-                "SELECT booking_id FROM bookings WHERE machine_id = ? AND booking_date = ? AND status IN ('Pending', 'Accepted')"
-            );
-            pstmt->setInt(1, machineId);
-            pstmt->setString(2, requestedDate);
-            sql::ResultSet* res = pstmt->executeQuery();
+        string sql = "SELECT booking_id FROM bookings WHERE machine_id = ? AND booking_date = ? AND status IN ('Pending', 'Accepted')";
+        sqlite3_stmt* stmt;
 
-            if (res->next()) available = false;
-
-            delete res;
-            delete pstmt;
-            delete con;
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, machineId);
+            sqlite3_bind_text(stmt, 2, requestedDate.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                available = false; 
+            }
         }
-        catch (sql::SQLException& e) {
-            cout << "\n[DB Error - Check Availability]: " << e.what() << "\n";
-        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
         return available;
     }
 
     vector<shared_ptr<Booking>> getAllBookings() override {
         vector<shared_ptr<Booking>> list;
-        try {
-            sql::Connection* con = DBManager::getConnection();
-            if (!con) return list;
+        sqlite3* db = DBManager::getConnection();
+        if (!db) return list;
 
-            sql::PreparedStatement* pstmt = con->prepareStatement(
-                "SELECT booking_id, farmer_id, machine_id, booking_date, hours, total_cost, status FROM bookings"
-            );
-            sql::ResultSet* res = pstmt->executeQuery();
+        string sql = "SELECT booking_id, farmer_id, machine_id, booking_date, hours, total_cost, status FROM bookings";
+        sqlite3_stmt* stmt;
 
-            while (res->next()) {
-                auto b = make_shared<Booking>(res->getInt(1), res->getInt(2), res->getInt(3),
-                    res->getString(4), res->getInt(5), res->getDouble(6));
-                b->setStatus(stringToStatus(res->getString(7)));
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                auto b = make_shared<Booking>(
+                    sqlite3_column_int(stmt, 0),
+                    sqlite3_column_int(stmt, 1),
+                    sqlite3_column_int(stmt, 2),
+                    reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3)),
+                    sqlite3_column_int(stmt, 4),
+                    sqlite3_column_double(stmt, 5)
+                );
+                b->setStatus(stringToStatus(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6))));
                 list.push_back(b);
             }
-            delete res; delete pstmt; delete con;
         }
-        catch (sql::SQLException& e) {
-            cout << "\n[DB Error - Get All Bookings]: " << e.what() << "\n";
-        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
         return list;
     }
 
     vector<shared_ptr<Booking>> getBookingsByFarmer(int farmerId) override {
         vector<shared_ptr<Booking>> list;
-        try {
-            sql::Connection* con = DBManager::getConnection();
-            if (!con) return list;
+        sqlite3* db = DBManager::getConnection();
+        if (!db) return list;
 
-            sql::PreparedStatement* pstmt = con->prepareStatement(
-                "SELECT booking_id, farmer_id, machine_id, booking_date, hours, total_cost, status FROM bookings WHERE farmer_id = ?"
-            );
-            pstmt->setInt(1, farmerId);
-            sql::ResultSet* res = pstmt->executeQuery();
+        string sql = "SELECT booking_id, farmer_id, machine_id, booking_date, hours, total_cost, status FROM bookings WHERE farmer_id = ?";
+        sqlite3_stmt* stmt;
 
-            while (res->next()) {
-                auto b = make_shared<Booking>(res->getInt(1), res->getInt(2), res->getInt(3),
-                    res->getString(4), res->getInt(5), res->getDouble(6));
-                b->setStatus(stringToStatus(res->getString(7)));
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, farmerId);
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                auto b = make_shared<Booking>(
+                    sqlite3_column_int(stmt, 0),
+                    sqlite3_column_int(stmt, 1),
+                    sqlite3_column_int(stmt, 2),
+                    reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3)),
+                    sqlite3_column_int(stmt, 4),
+                    sqlite3_column_double(stmt, 5)
+                );
+                b->setStatus(stringToStatus(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6))));
                 list.push_back(b);
             }
-            delete res; delete pstmt; delete con;
         }
-        catch (sql::SQLException& e) {
-            cout << "\n[DB Error - Get Bookings By Farmer]: " << e.what() << "\n";
-        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
         return list;
     }
 
     shared_ptr<Booking> getById(int id) override {
         shared_ptr<Booking> found = nullptr;
-        try {
-            sql::Connection* con = DBManager::getConnection();
-            if (!con) return nullptr;
+        sqlite3* db = DBManager::getConnection();
+        if (!db) return nullptr;
 
-            sql::PreparedStatement* pstmt = con->prepareStatement(
-                "SELECT booking_id, farmer_id, machine_id, booking_date, hours, total_cost, status FROM bookings WHERE booking_id = ?"
-            );
-            pstmt->setInt(1, id);
-            sql::ResultSet* res = pstmt->executeQuery();
+        string sql = "SELECT booking_id, farmer_id, machine_id, booking_date, hours, total_cost, status FROM bookings WHERE booking_id = ?";
+        sqlite3_stmt* stmt;
 
-            if (res->next()) {
-                found = make_shared<Booking>(res->getInt(1), res->getInt(2), res->getInt(3),
-                    res->getString(4), res->getInt(5), res->getDouble(6));
-                found->setStatus(stringToStatus(res->getString(7)));
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, id);
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                found = make_shared<Booking>(
+                    sqlite3_column_int(stmt, 0),
+                    sqlite3_column_int(stmt, 1),
+                    sqlite3_column_int(stmt, 2),
+                    reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3)),
+                    sqlite3_column_int(stmt, 4),
+                    sqlite3_column_double(stmt, 5)
+                );
+                found->setStatus(stringToStatus(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6))));
             }
-            delete res; delete pstmt; delete con;
         }
-        catch (sql::SQLException& e) {
-            cout << "\n[DB Error - Get Booking By ID]: " << e.what() << "\n";
-        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
         return found;
     }
 
-    // --- New Optimized Queries ---
     void getOwnerFinancialStats(int ownerId, int& completedCount, double& totalEarnings) override {
         completedCount = 0;
         totalEarnings = 0.0;
-        try {
-            sql::Connection* con = DBManager::getConnection();
-            if (!con) return;
+        sqlite3* db = DBManager::getConnection();
+        if (!db) return;
 
-            sql::PreparedStatement* pstmt = con->prepareStatement(
-                "SELECT COUNT(b.booking_id), SUM(b.total_cost * 0.95) "
-                "FROM bookings b "
-                "JOIN machines m ON b.machine_id = m.machine_id "
-                "WHERE m.owner_id = ? AND b.status = 'Completed'"
-            );
-            pstmt->setInt(1, ownerId);
-            sql::ResultSet* res = pstmt->executeQuery();
+        string sql = "SELECT COUNT(b.booking_id), SUM(b.total_cost * 0.95) FROM bookings b JOIN machines m ON b.machine_id = m.machine_id WHERE m.owner_id = ? AND b.status = 'Completed'";
+        sqlite3_stmt* stmt;
 
-            if (res->next()) {
-                completedCount = res->getInt(1);
-                // Handle NULL if there are no completed jobs yet
-                totalEarnings = res->isNull(2) ? 0.0 : res->getDouble(2);
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, ownerId);
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                completedCount = sqlite3_column_int(stmt, 0);
+                if (sqlite3_column_type(stmt, 1) != SQLITE_NULL) {
+                    totalEarnings = sqlite3_column_double(stmt, 1);
+                }
             }
-
-            delete res;
-            delete pstmt;
-            delete con;
         }
-        catch (sql::SQLException& e) {
-            cout << "\n[DB Error - Get Owner Stats]: " << e.what() << "\n";
-        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
     }
 
     vector<OwnerBookingDTO> getOwnerBookingsDetails(int ownerId) override {
         vector<OwnerBookingDTO> list;
-        try {
-            sql::Connection* con = DBManager::getConnection();
-            if (!con) return list;
+        sqlite3* db = DBManager::getConnection();
+        if (!db) return list;
 
-            sql::PreparedStatement* pstmt = con->prepareStatement(
-                "SELECT b.booking_id, b.machine_id, m.machine_type, b.booking_date, b.hours, b.total_cost, b.status, u.name, u.phone "
-                "FROM bookings b "
-                "JOIN machines m ON b.machine_id = m.machine_id "
-                "JOIN users u ON b.farmer_id = u.user_id "
-                "WHERE m.owner_id = ?"
-            );
-            pstmt->setInt(1, ownerId);
-            sql::ResultSet* res = pstmt->executeQuery();
+        string sql = "SELECT b.booking_id, b.machine_id, m.machine_type, b.booking_date, b.hours, b.total_cost, b.status, u.name, u.phone FROM bookings b JOIN machines m ON b.machine_id = m.machine_id JOIN users u ON b.farmer_id = u.user_id WHERE m.owner_id = ?";
+        sqlite3_stmt* stmt;
 
-            while (res->next()) {
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, ownerId);
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
                 OwnerBookingDTO dto;
-                dto.bookingId = res->getInt(1);
-                dto.machineId = res->getInt(2);
-                dto.machineType = res->getString(3);
-                dto.bookingDate = res->getString(4);
-                dto.hours = res->getInt(5);
-                dto.totalCost = res->getDouble(6);
-                dto.status = stringToStatus(res->getString(7));
-                dto.farmerName = res->getString(8);
-                dto.farmerPhone = res->getString(9);
+                dto.bookingId = sqlite3_column_int(stmt, 0);
+                dto.machineId = sqlite3_column_int(stmt, 1);
+                dto.machineType = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+                dto.bookingDate = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+                dto.hours = sqlite3_column_int(stmt, 4);
+                dto.totalCost = sqlite3_column_double(stmt, 5);
+                dto.status = stringToStatus(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6)));
+                dto.farmerName = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 7));
+                dto.farmerPhone = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 8));
                 list.push_back(dto);
             }
-            delete res; delete pstmt; delete con;
         }
-        catch (sql::SQLException& e) {
-            cout << "\n[DB Error - Get Owner Bookings Details]: " << e.what() << "\n";
-        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
         return list;
     }
 };
@@ -1023,9 +963,11 @@ void showMainMenu() {
 }
 
 int main() {
-    MySQLUserRepo userRepo;
-    MySQLMachineRepo machineRepo;
-    MySQLBookingRepo bookingRepo;
+    DBManager::initializeSchema();
+
+    SQLiteUserRepo userRepo;
+    SQLiteMachineRepo machineRepo;
+    SQLiteBookingRepo bookingRepo;
 
     AuthService authService(userRepo);
     BookingService bookingService(bookingRepo, machineRepo, userRepo);
