@@ -1,7 +1,7 @@
 # 🚜 Agri-Uber: Agricultural Resource Management System
 
 ## 📌 Project Overview
-Agri-Uber is a comprehensive C++ console application designed to bridge the gap between **Farmers** and **Agricultural Machine Owners**. It provides a seamless platform for booking machinery, managing schedules, and tracking financial statistics, fully integrated with a **MySQL** database for robust data persistence.
+Agri-Uber is a comprehensive C++ console application designed to bridge the gap between **Farmers** and **Agricultural Machine Owners**. It provides a seamless platform for booking machinery, managing schedules, and tracking financial statistics, fully integrated with a **SQLite** database for robust, lightweight, and zero-configuration data persistence.
 
 *Developed as a project submission for the Information Technology Institute (ITI).*
 
@@ -14,8 +14,8 @@ Agri-Uber is a comprehensive C++ console application designed to bridge the gap 
 
 ## 🛠️ Tech Stack & Architecture
 - **Language:** C++
-- **Database:** MySQL Server
-- **Database Driver:** MySQL Connector/C++ (JDBC API)
+- **Database:** SQLite (Serverless, self-contained SQL database engine)
+- **Database Driver:** SQLite3 C/C++ API
 - **Architecture & Design Patterns:**
   - **Repository Pattern:** Clean separation between business logic and data access.
   - **Dependency Injection:** Repositories are injected into Service classes.
@@ -23,17 +23,15 @@ Agri-Uber is a comprehensive C++ console application designed to bridge the gap 
 
 ## ⚙️ How to Setup and Run
 
-### 1. Database Configuration
-Due to connection export constraints, the raw database files are provided for a guaranteed setup.
-1. Locate the `agri_uber.zip` file in this repository.
-2. Extract the `agri_uber` folder from the zip file.
-3. Paste it into your MySQL data directory: `C:\xampp\mysql\data\`.
-4. Start the **MySQL module** via XAMPP on port **3307**.
+### 1. Zero-Configuration Database
+Unlike traditional DBMS setups, this project uses **SQLite**. There is no need to install XAMPP, configure ports, or run external database servers. 
+- Upon running the application for the first time, a local database file named `agri_uber.db` is **automatically generated** in the root directory.
+- All required tables and schemas are initialized automatically by the application code.
 
 ### 2. Running the Application
 1. Open the `ITI Project.sln` file using **Visual Studio**.
 2. Build and Run the project (`Ctrl + F5`).
-*Note: All required DLLs (e.g., `mysqlcppconn-10-vs14.dll`) are included in the root folder.*
+*Note: The required SQLite source files (`sqlite3.h` and `sqlite3.c`) are already included within the project source code. No external DLLs are needed!*
 
 ---
 
@@ -45,5 +43,3 @@ The project stems from a real-world agricultural challenge: **Access to Technolo
 - **For the Farmer:** It democratizes access to advanced tools. A farmer can "hail" a tractor for a specific date and duration, paying only for what they use, which significantly reduces harvest costs.
 - **For the Owner:** It turns idle machinery into a profit center, ensuring their equipment is working and earning throughout the year.
 - **The Result:** A shared economy model that boosts agricultural productivity and ensures that no land goes unplowed due to a lack of equipment.
-
-
