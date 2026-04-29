@@ -43,3 +43,5 @@ The project stems from a real-world agricultural challenge: **Access to Technolo
 - **For the Farmer:** It democratizes access to advanced tools. A farmer can "hail" a tractor for a specific date and duration, paying only for what they use, which significantly reduces harvest costs.
 - **For the Owner:** It turns idle machinery into a profit center, ensuring their equipment is working and earning throughout the year.
 - **The Result:** A shared economy model that boosts agricultural productivity and ensures that no land goes unplowed due to a lack of equipment.
+
+- ##Schema : https://drive.google.com/file/d/1gMxBt7OPKDrmr_YEH2lUbQMPyRY_0bxW/view?usp=sharing
